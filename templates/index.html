@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Psychosis Classification - AI Diagnosis System</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1><i class="fas fa-brain"></i> Neuro-Diagnosis AI</h1>
+        <p>Advanced fMRI Classification System</p>
+      </div>
+
+      <div class="content">
+
+        <div class="metrics-dashboard">
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.accuracy }}</div>
+                <div class="metric-label">Model Accuracy</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.auc }}</div>
+                <div class="metric-label">AUC Score</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.precision }}</div>
+                <div class="metric-label">Precision</div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+          <h3><i class="fas fa-info-circle"></i> System Capabilities</h3>
+          <ul>
+            <li><strong>Input:</strong> Accepts Subject Folder containing <code>fnc.npy</code> or <code>fnc.mat</code></li>
+            <li><strong>Classification:</strong> Schizophrenia (SZ) vs Bipolar Disorder (BP)</li>
+            <li><strong>Engine:</strong> Dense Neural Network (DNN) with Optimized Threshold</li>
+          </ul>
+        </div>
+
+        <div class="upload-section">
+          <label for="folderInput" class="upload-box" id="uploadBox">
+            <i class="fas fa-folder-open file-icon"></i>
+            <span id="fileName">Select Subject Folder</span>
+          </label>
+          <input type="file" id="folderInput" webkitdirectory directory multiple />
+        </div>
+
+        <div class="ground-truth-section">
+          <label for="groundTruth">
+            <i class="fas fa-check-double"></i> Verification (Optional)
+          </label>
+          <select id="groundTruth">
+            <option value="">-- Unknown Diagnosis --</option>
+            <option value="0">Schizophrenia (SZ)</option>
+            <option value="1">Bipolar Disorder (BP)</option>
+          </select>
+        </div>
+
+        <button class="btn-primary" onclick="predict()" id="predictBtn">
+          Run Diagnosis
+        </button>
+
+        <div class="loader" id="loader"></div>
+
+        <div id="resultPanel">
+          <div class="result-card" id="resultCard">
+            <div class="result-header">ANALYSIS RESULT</div>
+            <div class="result-diagnosis" id="diagnosisText"></div>
+
+            <div class="result-details">
+                <div class="detail-row">
+                    <span class="detail-label">File Processed</span>
+                    <span class="detail-value" id="processedFile" style="font-size: 0.9em; overflow:hidden;">-</span>
+                  </div>
+              <div class="detail-row">
+                <span class="detail-label">Confidence</span>
+                <span class="detail-value" id="confidenceScore"></span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Raw Probability</span>
+                <span class="detail-value" id="rawScore"></span>
+              </div>
+            </div>
+
+            <div class="probability-scale">
+              <div class="scale-bar">
+                <div class="scale-marker" id="scaleMarker"></div>
+              </div>
+              <div class="scale-labels">
+                <span>SZ (0.0)</span>
+                <span>BP (1.0)</span>
+              </div>
+            </div>
+
+            <div id="accuracyBadge"></div>
+          </div>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+      </div>
+    </div>
+
+    <script>
+      const folderInput = document.getElementById("folderInput");
+      const fileNameSpan = document.getElementById("fileName");
+      const uploadBox = document.getElementById("uploadBox");
+
+      folderInput.addEventListener("change", function () {
+        if (this.files && this.files.length > 0) {
+          // Display the folder name (relative path of first file usually hints folder name)
+          const folderName = this.files[0].webkitRelativePath.split('/')[0];
+          fileNameSpan.innerHTML = `<strong>Selected:</strong> ${folderName} <br><span style='font-size:0.8em; color:#666'>(${this.files.length} files detected)</span>`;
+          uploadBox.classList.add("has-file");
+        }
+      });
+
+      async function predict() {
+        if (folderInput.files.length === 0) {
+          alert("Please upload a subject folder first!");
+          return;
+        }
+
+        const formData = new FormData();
+        // Append all files in the folder to the request
+        for (let i = 0; i < folderInput.files.length; i++) {
+            formData.append("files", folderInput.files[i]);
+        }
+
+        const groundTruth = document.getElementById("groundTruth").value;
+        if (groundTruth !== "") {
+          formData.append("ground_truth", groundTruth);
+        }
+
+        // UI Updates
+        document.getElementById("predictBtn").disabled = true;
+        document.getElementById("loader").style.display = "block";
+        document.getElementById("resultPanel").style.display = "none";
+        document.getElementById("errorMessage").style.display = "none";
+
+        try {
+          const response = await fetch("/predict", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+
+          document.getElementById("loader").style.display = "none";
+          document.getElementById("predictBtn").disabled = false;
+
+          if (data.error) {
+            const errorDiv = document.getElementById("errorMessage");
+            errorDiv.textContent = data.error;
+            errorDiv.style.display = "block";
+          } else {
+            displayResults(data);
+          }
+        } catch (error) {
+          console.error("Error:", error);
+          const errorDiv = document.getElementById("errorMessage");
+          errorDiv.textContent = "Server Connection Failed";
+          errorDiv.style.display = "block";
+          document.getElementById("loader").style.display = "none";
+          document.getElementById("predictBtn").disabled = false;
+        }
+      }
+
+      function displayResults(data) {
+        const resultCard = document.getElementById("resultCard");
+        const isSZ = data.result.includes("Schizophrenia");
+
+        resultCard.className = "result-card " + (isSZ ? "sz" : "bp");
+        document.getElementById("diagnosisText").textContent = data.result;
+        document.getElementById("processedFile").textContent = data.filename;
+        document.getElementById("rawScore").textContent = data.raw_score.toFixed(4);
+        document.getElementById("confidenceScore").textContent = data.confidence;
+
+        const marker = document.getElementById("scaleMarker");
+        marker.style.left = (data.raw_score * 100) + "%";
+
+        const accuracyDiv = document.getElementById("accuracyBadge");
+        if (data.is_correct !== undefined) {
+          if (data.is_correct) {
+            accuracyDiv.innerHTML = '<span class="accuracy-badge correct"><i class="fas fa-check-circle"></i> Diagnosis Matches Ground Truth</span>';
+          } else {
+            accuracyDiv.innerHTML = '<span class="accuracy-badge incorrect"><i class="fas fa-times-circle"></i> Diagnosis Mismatch</span>';
+          }
+        } else {
+          accuracyDiv.innerHTML = "";
+        }
+
+        document.getElementById("resultPanel").style.display = "block";
+      }
+    </script>
+  </body>
+</html>
